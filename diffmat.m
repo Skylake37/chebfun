@@ -128,7 +128,7 @@ if ( strcmpi(mapFrom, mapTo) && ( m == n ) ) % Square case:
         % Flipping trick for symmetry:
         d = diag(rot90(D));
         d = sign(d).*(abs(d) + abs(flipud(d)))/2;
-        D(logical(flipud(eye(N)))) = d;
+        D(logical(flipud(eye(N)))) = d(end:-1:1);
         DRot = rot90(D, 2);
         idxTo = rot90(~triu(ones(N)));
         D(idxTo) = (-1)^p*DRot(idxTo);
