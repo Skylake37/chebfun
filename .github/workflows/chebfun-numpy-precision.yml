@@ -3,6 +3,13 @@
 name: Chebfun vs NumPy precision
 
 on:
+  push:
+    branches:
+      - master
+      - 'experiment/matlab-chebfun-numpy-precision-*'
+    paths:
+      - '.github/workflows/chebfun-numpy-precision.yml'
+      - 'ci/precision/**'
   workflow_dispatch:
 
 permissions:
