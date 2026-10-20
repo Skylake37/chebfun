@@ -71,7 +71,7 @@ jobs:
           if (-not (Test-Path $engineDist)) { throw "MATLAB Engine distribution not found: $engineDist" }
           $env:PYTHONPATH = if ($env:PYTHONPATH) { "$engineDist;$env:PYTHONPATH" } else { $engineDist }
           "PYTHONPATH=$env:PYTHONPATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $venvPython -c "import matlab.engine, numpy; print('Engine:', matlab.engine.__file__); print('Isolated NumPy:', numpy.__version__, numpy.__file__)"
+          & $venvPython -c "import sys, pathlib, matlab.engine, numpy; assert pathlib.Path(numpy.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve()), 'NumPy escaped virtual environment'; print('Engine:', matlab.engine.__file__); print('Isolated NumPy:', numpy.__version__, numpy.__file__)"
           if ($LASTEXITCODE -ne 0) { throw 'MATLAB Engine or NumPy import failed in uv environment' }
 
       - name: Call Chebfun classdef methods from local Python
