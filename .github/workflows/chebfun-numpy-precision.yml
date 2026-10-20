@@ -178,3 +178,15 @@ jobs:
           Copy-Item -Path (Join-Path $source '*') -Destination $archive -Recurse -Force
           Write-Host "Results saved in local run archive: _local_results"
           "Chebfun precision results: _local_results/precision/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload sanitized precision results to GitHub
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chebfun-precision-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            precision_results/*.csv
+            precision_results/SUMMARY.md
+            precision_results/matlab_environment.txt
+          if-no-files-found: error
+          retention-days: 14
