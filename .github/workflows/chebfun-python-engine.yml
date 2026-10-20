@@ -27,42 +27,56 @@ jobs:
       run:
         shell: pwsh
     steps:
+      - name: Mask local runner identifiers
+        run: |
+          foreach ($value in @(
+            $env:USERNAME, $env:USERDOMAIN, $env:COMPUTERNAME,
+            $env:RUNNER_NAME, $env:USERPROFILE, $env:HOME,
+            $env:APPDATA, $env:LOCALAPPDATA,
+            $env:GITHUB_WORKSPACE, $env:RUNNER_WORKSPACE, $env:RUNNER_TEMP
+          )) {
+            if ($value -and $value.Length -ge 4) {
+              Write-Output "::add-mask::$value"
+              Write-Output "::add-mask::$($value.Replace('\', '/'))"
+            }
+          }
+
       - name: Update persistent Chebfun checkout
         run: |
           $repo = $env:GITHUB_WORKSPACE
           New-Item -ItemType Directory -Force -Path $repo | Out-Null
           if (-not (Test-Path (Join-Path $repo '.git'))) {
-            git -C $repo init
+            git -C $repo -q init
             if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
             git -C $repo remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
             if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
           }
-          git -C $repo fetch --no-tags --depth=1 origin $env:GITHUB_SHA
+          git -C $repo fetch --quiet --no-tags --depth=1 origin $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
-          git -C $repo checkout --detach --force $env:GITHUB_SHA
+          git -C $repo checkout --quiet --detach --force $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
           $actual = (git -C $repo rev-parse HEAD).Trim()
           if ($actual -ne $env:GITHUB_SHA) { throw "Checkout mismatch: $actual" }
-          Write-Host "Chebfun source: $repo ($actual)"
+          Write-Host "Chebfun checkout: $($actual.Substring(0, 12))"
 
       - name: Verify local MATLAB and provision isolated uv environment
         run: |
           if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
             throw 'uv is required. Install it once with: winget install --id astral-sh.uv -e ; then restart run.cmd'
           }
-          python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 11, 9), 'Expected Python 3.11.9'"
+          python -c "import sys; assert sys.version_info[:3] == (3, 11, 9), 'Expected Python 3.11.9'; print('Base Python: 3.11.9')"
           if ($LASTEXITCODE -ne 0) { throw 'Incorrect base Python interpreter' }
           $basePython = (python -c "import sys; print(sys.executable)").Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Could not locate base Python' }
           $venv = Join-Path $env:GITHUB_WORKSPACE '.venv-chebfun-engine'
           $venvPython = Join-Path $venv 'Scripts\python.exe'
           if (-not (Test-Path $venvPython)) {
-            uv venv --no-python-downloads --python $basePython $venv
+            uv --quiet venv --no-python-downloads --python $basePython $venv
             if ($LASTEXITCODE -ne 0) { throw 'uv failed to create isolated environment' }
           }
-          & $venvPython -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix; assert sys.version_info[:3] == (3,11,9)"
+          & $venvPython -c "import sys; assert sys.prefix != sys.base_prefix; assert sys.version_info[:3] == (3,11,9); print('uv environment: isolated Python 3.11.9')"
           if ($LASTEXITCODE -ne 0) { throw 'Invalid isolated Python environment' }
-          uv pip install --python $venvPython numpy==2.3.5
+          uv --quiet pip install --python $venvPython numpy==2.3.5
           if ($LASTEXITCODE -ne 0) { throw 'uv failed to install isolated NumPy' }
           $matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
           $matlabExe = Join-Path $matlabRoot 'bin\matlab.exe'
@@ -71,7 +85,7 @@ jobs:
           if (-not (Test-Path $engineDist)) { throw "MATLAB Engine distribution not found: $engineDist" }
           $env:PYTHONPATH = if ($env:PYTHONPATH) { "$engineDist;$env:PYTHONPATH" } else { $engineDist }
           "PYTHONPATH=$env:PYTHONPATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $venvPython -c "import sys, pathlib, matlab.engine, numpy; assert pathlib.Path(numpy.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve()), 'NumPy escaped virtual environment'; print('Engine:', matlab.engine.__file__); print('Isolated NumPy:', numpy.__version__, numpy.__file__)"
+          & $venvPython -c "import sys, pathlib, matlab.engine, numpy; assert pathlib.Path(numpy.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve()), 'NumPy escaped virtual environment'; print('MATLAB Engine: ready; NumPy:', numpy.__version__)"
           if ($LASTEXITCODE -ne 0) { throw 'MATLAB Engine or NumPy import failed in uv environment' }
 
       - name: Call Chebfun classdef methods from local Python
@@ -89,5 +103,5 @@ jobs:
           $archive = Join-Path $env:GITHUB_WORKSPACE "_local_results\engine\$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           New-Item -ItemType Directory -Force -Path $archive | Out-Null
           Copy-Item $source (Join-Path $archive 'results.json') -Force
-          Write-Host "Results saved locally: $archive"
-          "Python to Chebfun results saved at: $archive" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          Write-Host "Results saved in local run archive: _local_results"
+          "Python to Chebfun results: _local_results/engine/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/results.json" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
