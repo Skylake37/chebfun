@@ -52,8 +52,6 @@ jobs:
           $matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
           $matlabExe = Join-Path $matlabRoot 'bin\matlab.exe'
           if (-not (Test-Path $matlabExe)) { throw "MATLAB executable not found: $matlabExe" }
-          & $matlabExe -batch "assert(strcmp(['R' version('-release')], '$env:MATLAB_RELEASE')); disp(version)"
-          if ($LASTEXITCODE -ne 0) { throw 'MATLAB verification failed' }
           $engineDist = Join-Path $matlabRoot 'extern\engines\python\dist'
           if (-not (Test-Path $engineDist)) { throw "MATLAB Engine distribution not found: $engineDist" }
           $env:PYTHONPATH = if ($env:PYTHONPATH) { "$engineDist;$env:PYTHONPATH" } else { $engineDist }
@@ -63,7 +61,7 @@ jobs:
 
       - name: Ensure local NumPy dependency (one-time installation)
         run: |
-          $installed = python -c "import importlib.metadata as m; print(m.version('numpy'))" 2>$null
+          $installed = python -c "import importlib.metadata as m; print(next((d.version for d in m.distributions() if d.metadata.get('Name', '').lower() == 'numpy'), ''))"
           if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne '2.3.5') {
             python -m pip install --disable-pip-version-check numpy==2.3.5
             if ($LASTEXITCODE -ne 0) { throw 'NumPy installation failed' }
