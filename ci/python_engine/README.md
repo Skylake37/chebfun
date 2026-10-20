@@ -36,7 +36,7 @@ With MATLAB R2026b installed and licensed, and a compatible Python
 environment:
 
 ```bash
-python -m pip install numpy "matlabengine>=26.2,<26.3"
+python -m pip install numpy==2.3.5 matlabengine==26.2.5
 python ci/python_engine/chebfun_engine_demo.py
 ```
 
