@@ -27,7 +27,7 @@ python --version  # Expected 3.11.9
 
 If uv was installed while the runner was already active, **stop and restart
 `run.cmd`** so the runner can see the updated PATH. Git for Windows,
-PowerShell 7 (`pwsh`), and MATLAB R2026a at
+Windows PowerShell 5.1 (`powershell`), and MATLAB R2026a at
 `C:\Program Files\MATLAB\R2026a` must also be available (or choose R2026b
 if installed).
 
@@ -111,8 +111,11 @@ Windows profile directory.
 
 **Runner-managed setup output** is emitted before the first workflow step.
 The GitHub runner itself reports its registered runner name and host machine
-name, and may report the physical PowerShell executable path. Workflow
-masking cannot retroactively hide that initial output. To reduce this
+name; workflow masking cannot retroactively hide those fields. The Windows
+jobs explicitly use the built-in `powershell` shell, whose executable is
+located under the Windows system directory. This avoids disclosing a user
+profile through the PowerShell 7 Microsoft Store executable path in the
+first (pre-mask) step. To reduce this
 exposure, register the runner using a generic `--name` (such as
 `matlab-worker`) and, for stronger host isolation, use a dedicated
 Windows VM with a generic computer name. Renaming the runner alone does not
