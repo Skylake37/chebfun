@@ -94,6 +94,35 @@ python -m pip install numpy==2.4.4
 
 None of the revised Windows workflow steps execute that command.
 
+## CI privacy and log minimization
+
+The Windows workflows register `::add-mask::` for the Windows user and domain
+names, machine and runner names, home/profile/application-data directories,
+GitHub workspace, and runner temporary/work directories at the **first job
+step**. They suppress normal absolute-path output from Git and uv.
+
+The Engine example logs only the repository-relative class constructor
+(`<repo>/@chebfun/chebfun.m`) and a compact result summary. Its local
+`results.json` contains `"chebfun_constructor": "@chebfun/chebfun.m"`.
+Precision exports record relative function paths in
+`precision_results/matlab_environment.txt`. Job summaries use
+`_local_results/<kind>/<run-id>-<attempt>` without exposing the drive or
+Windows profile directory.
+
+**Runner-managed setup output** is emitted before the first workflow step.
+The GitHub runner itself reports its registered runner name and host machine
+name, and may report the physical PowerShell executable path. Workflow
+masking cannot retroactively hide that initial output. To reduce this
+exposure, register the runner using a generic `--name` (such as
+`matlab-worker`) and, for stronger host isolation, use a dedicated
+Windows VM with a generic computer name. Renaming the runner alone does not
+rename the Windows computer.
+
+Pre-existing workflow run logs and artifacts retain whatever previous jobs
+wrote. GitHub permits deleting individual run logs from the run's
+`...` menu -> **Delete all logs**. Review older runs if historical hostnames
+and full paths are sensitive.
+
 ## Security
 
 A self-hosted runner executes code with the Windows user's permissions.
