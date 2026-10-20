@@ -87,7 +87,7 @@ jobs:
       MATLAB_RELEASE: ${{ inputs.matlab_release }}
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     steps:
       - name: Mask local runner identifiers
         run: |
