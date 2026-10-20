@@ -1,62 +1,75 @@
-# Python calls MATLAB Chebfun
+# Python calls MATLAB Chebfun on a Windows self-hosted GitHub runner
 
-This example starts MATLAB from Python using the MATLAB Engine API, adds the
-checked-out Chebfun root to the MATLAB path, constructs actual `chebfun`
-`classdef` objects, invokes their methods, and checks NumPy arrays returned
-to Python. It also invokes the regular Chebfun function `chebpts` via
-`eng.feval`.
+The GitHub workflow **Python calls MATLAB Chebfun (Engine)** runs on your
+own licensed Windows PC. It calls actual Chebfun `classdef` methods from
+Python, converts MATLAB arrays to NumPy, verifies results, and uploads JSON.
 
-## GitHub Actions
+## Register your Windows computer
 
-Run **Python calls MATLAB Chebfun (Engine)** from the Actions tab using
-**Run workflow**.
+1. Open [this repository's Actions runners settings](https://github.com/Skylake37/chebfun/settings/actions/runners)
+   and choose **New self-hosted runner** -> **Windows** -> **x64**.
+2. In PowerShell, follow the download/extract instructions shown by GitHub.
+   Register using the short-lived token shown there:
+   ```powershell
+   .\config.cmd --url https://github.com/Skylake37/chebfun `
+     --token <TOKEN_FROM_GITHUB> `
+     --labels matlab-engine
+   ```
+3. For an initial run, decline Windows service installation and start the
+   runner interactively, under the Windows account with the MATLAB license:
+   ```powershell
+   .\run.cmd
+   ```
+4. From the repository's **Actions** tab, select
+   **Python calls MATLAB Chebfun (Engine)** -> **Run workflow** and choose the
+   installed MATLAB release, **R2026a** (default) or **R2026b**.
 
-The workflow deliberately targets a **self-hosted Linux runner** with the
-labels `self-hosted`, `linux`, and `matlab-r2026b`. That runner must have:
+The job selects the custom labels
+`[self-hosted, windows, x64, matlab-engine]`. The runner needs Git,
+PowerShell, network access to GitHub and the Python package index, and a
+licensed MATLAB installation in the standard location:
+`C:\Program Files\MATLAB\R2026a` or `R2026b`.
 
-- An **independently licensed MATLAB R2026b** installation, available at
-  `/usr/local/MATLAB/R2026b` (adjust the workflow's `MATLAB_ROOT` if needed).
-- A license usable for MATLAB Engine for Python by the runner service account.
-- The standard dependencies needed to run MATLAB and GitHub Actions.
+It uses `actions/setup-python` to provision Python 3.13 and installs the
+matching MATLAB Engine package from
+`<matlabroot>\extern\engines\python`. This avoids accidentally installing
+a PyPI Engine package targeting a different MATLAB release.
 
-The job installs Python 3.13, NumPy, and the matching R2026b Python
-`matlabengine` package, verifies the MATLAB release, and runs the example.
-The resulting `python_engine_results/results.json` is uploaded as an artifact.
+## Run the same example directly from PowerShell
 
-**Licensing:** MathWorks' public-project GitHub-hosted MATLAB license and
-MATLAB batch licensing tokens do not support external-language interfaces,
-including the MATLAB Engine API. Therefore `ubuntu-latest` together with
-`matlab-actions/setup-matlab` cannot execute this direct Python-to-MATLAB
-Engine test under those licenses. Installing a MATLAB release through the
-setup action does not itself grant an Engine-compatible license.
+From the repository root, with Python 3.13 installed:
 
-## Run locally
-
-With MATLAB R2026b installed and licensed, and a compatible Python
-environment:
-
-```bash
-python -m pip install numpy==2.3.5 matlabengine==26.2.5
+```powershell
+$env:MATLAB_RELEASE = 'R2026a'  # Change to R2026b when installed
+$matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
+python -m pip install numpy==2.3.5
+python -m pip install (Join-Path $matlabRoot 'extern\engines\python')
 python ci/python_engine/chebfun_engine_demo.py
 ```
 
-The script locates the repository relative to its own path, so it can be
-executed from any working directory. On GitHub Actions it uses
-`GITHUB_WORKSPACE`.
+## Chebfun classdef resolution
 
-## Working with `classdef` methods
+The repository root, containing `@chebfun/chebfun.m`, is added to the MATLAB
+path. MATLAB resolves `@class` and `+package` folders automatically;
+avoid adding each class/package directory separately using `genpath`.
 
-Chebfun defines `classdef chebfun` in `@chebfun/chebfun.m`.
-Adding **the repository root alone** to the MATLAB path enables MATLAB's
-normal `@class` and `+package` method resolution.
+The Python code keeps `chebfun` objects in the MATLAB engine workspace,
+calls `feval(f, ...)`, `diff(f)`, `roots(f)` and `sum(f)` via `eng.eval`,
+and calls the ordinary Chebfun function `chebpts` through
+`eng.feval("chebpts", ...)`. The results become NumPy arrays via
+`tomemoryview()`. To call another Chebfun function or class method, replace
+the MATLAB expression and convert its numerical output the same way.
 
-The Python code leaves the Chebfun objects `f` and `df` in the MATLAB
-engine workspace, then calls arbitrary MATLAB/Chebfun expressions through
-`eng.eval(...)`. Ordinary functions can also be invoked directly with
-`eng.feval("function_name", ...)`. For example, replace `roots(f)` or
-`sum(f)` with other Chebfun functions or overloaded methods. Return numeric
-results from the MATLAB expression, then convert them to NumPy using
-`tomemoryview()`.
+Results are stored in `python_engine_results/results.json` and uploaded by
+the workflow.
 
-The example verifies function values, the derivative, the integral, two
-roots, and Chebyshev points against independent NumPy calculations.
+## Licensing and permissions
+
+GitHub-hosted MATLAB public-project licensing and MATLAB batch licensing
+tokens do not support the MATLAB Engine API for Python. This workflow runs
+against your local MATLAB license via the Windows self-hosted runner.
+
+Self-hosted runners execute code from the repository with the runner
+account's operating-system privileges. Use `workflow_dispatch` and grant
+workflow write access only to trusted collaborators, especially for public
+repositories.
