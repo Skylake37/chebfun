@@ -33,8 +33,9 @@ if installed).
 
 ## What the workflows do
 
-The jobs do not invoke third-party `uses:` actions, and update the local
-Chebfun checkout incrementally with `git fetch`.
+The Windows jobs use only the official `actions/upload-artifact@v4` action;
+they do not download checkout or Python setup actions. The local Chebfun
+checkout updates incrementally with `git fetch`.
 
 Each Windows job creates its own persistent environment in
 `GITHUB_WORKSPACE`:
@@ -65,8 +66,14 @@ the demo under `.venv-chebfun-engine\Scripts\python.exe`.
 
 Results are saved locally under `python_engine_results` or
 `precision_results` and additionally archived in `_local_results`, with
-run-specific subdirectories. GitHub logs show the relative archive path. GitHub
-artifacts are not uploaded by the Windows jobs.
+run-specific subdirectories. GitHub logs show the relative archive path.
+Successful Windows runs also upload sanitized results as **GitHub Actions
+Artifacts**, retained for 14 days. The Engine artifact contains only
+`python_engine_results/results.json`. The precision artifact includes
+`precision_results/*.csv`, `SUMMARY.md` and `matlab_environment.txt`
+(with repository-relative Chebfun function paths). No Python virtual
+environment or local absolute path is included. These Artifacts are available
+under the associated GitHub Actions run's **Artifacts** section.
 
 ## Run the Engine demo manually without modifying global Python
 
@@ -120,6 +127,12 @@ exposure, register the runner using a generic `--name` (such as
 `matlab-worker`) and, for stronger host isolation, use a dedicated
 Windows VM with a generic computer name. Renaming the runner alone does not
 rename the Windows computer.
+
+Uploading an Artifact requires downloading the official upload action in
+each job, so there is a small preparation overhead. Python/uv environments
+and the local Git checkout remain persistent. Public-repository Artifacts
+can be downloaded by people with access to the workflow run; do not put
+secrets or personal information into any output file.
 
 Pre-existing workflow run logs and artifacts retain whatever previous jobs
 wrote. GitHub permits deleting individual run logs from the run's
