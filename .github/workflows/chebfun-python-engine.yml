@@ -45,10 +45,25 @@ jobs:
           if ($actual -ne $env:GITHUB_SHA) { throw "Checkout mismatch: $actual" }
           Write-Host "Chebfun source: $repo ($actual)"
 
-      - name: Verify local MATLAB and Python 3.11.9
+      - name: Verify local MATLAB and provision isolated uv environment
         run: |
+          if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+            throw 'uv is required. Install it once with: winget install --id astral-sh.uv -e ; then restart run.cmd'
+          }
           python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 11, 9), 'Expected Python 3.11.9'"
-          if ($LASTEXITCODE -ne 0) { throw 'Incorrect Python interpreter on PATH' }
+          if ($LASTEXITCODE -ne 0) { throw 'Incorrect base Python interpreter' }
+          $basePython = (python -c "import sys; print(sys.executable)").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not locate base Python' }
+          $venv = Join-Path $env:GITHUB_WORKSPACE '.venv-chebfun-engine'
+          $venvPython = Join-Path $venv 'Scripts\python.exe'
+          if (-not (Test-Path $venvPython)) {
+            uv venv --no-python-downloads --python $basePython $venv
+            if ($LASTEXITCODE -ne 0) { throw 'uv failed to create isolated environment' }
+          }
+          & $venvPython -c "import sys; print(sys.executable); assert sys.prefix != sys.base_prefix; assert sys.version_info[:3] == (3,11,9)"
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid isolated Python environment' }
+          uv pip install --python $venvPython numpy==2.3.5
+          if ($LASTEXITCODE -ne 0) { throw 'uv failed to install isolated NumPy' }
           $matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
           $matlabExe = Join-Path $matlabRoot 'bin\matlab.exe'
           if (-not (Test-Path $matlabExe)) { throw "MATLAB executable not found: $matlabExe" }
@@ -56,24 +71,15 @@ jobs:
           if (-not (Test-Path $engineDist)) { throw "MATLAB Engine distribution not found: $engineDist" }
           $env:PYTHONPATH = if ($env:PYTHONPATH) { "$engineDist;$env:PYTHONPATH" } else { $engineDist }
           "PYTHONPATH=$env:PYTHONPATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          python -c "import matlab.engine; print('Engine:', matlab.engine.__file__)"
-          if ($LASTEXITCODE -ne 0) { throw 'MATLAB Engine import failed' }
-
-      - name: Ensure local NumPy dependency (one-time installation)
-        run: |
-          $installed = python -c "import importlib.metadata as m; print(next((d.version for d in m.distributions() if d.metadata.get('Name', '').lower() == 'numpy'), ''))"
-          if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne '2.3.5') {
-            python -m pip install --disable-pip-version-check numpy==2.3.5
-            if ($LASTEXITCODE -ne 0) { throw 'NumPy installation failed' }
-          } else {
-            Write-Host "Reusing local NumPy $installed"
-          }
+          & $venvPython -c "import matlab.engine, numpy; print('Engine:', matlab.engine.__file__); print('Isolated NumPy:', numpy.__version__, numpy.__file__)"
+          if ($LASTEXITCODE -ne 0) { throw 'MATLAB Engine or NumPy import failed in uv environment' }
 
       - name: Call Chebfun classdef methods from local Python
         run: |
           $output = Join-Path $env:GITHUB_WORKSPACE 'python_engine_results'
           if (Test-Path $output) { Remove-Item -Recurse -Force $output }
-          python ci/python_engine/chebfun_engine_demo.py
+          $venvPython = Join-Path $env:GITHUB_WORKSPACE '.venv-chebfun-engine\Scripts\python.exe'
+          & $venvPython ci/python_engine/chebfun_engine_demo.py
           if ($LASTEXITCODE -ne 0) { throw 'Python/Chebfun Engine example failed' }
 
       - name: Preserve results locally
