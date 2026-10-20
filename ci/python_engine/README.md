@@ -1,75 +1,92 @@
-# Python calls MATLAB Chebfun on a Windows self-hosted GitHub runner
+# Windows self-hosted GitHub Actions: Python, MATLAB and Chebfun
 
-The GitHub workflow **Python calls MATLAB Chebfun (Engine)** runs on your
-own licensed Windows PC. It calls actual Chebfun `classdef` methods from
-Python, converts MATLAB arrays to NumPy, verifies results, and uploads JSON.
+This fork has two workflows that can run on the same Windows PC using your
+installed MATLAB license and **Python 3.11.9**, invoked as `python`.
 
-## Register your Windows computer
+- [Python calls MATLAB Chebfun (Engine)](../../.github/workflows/chebfun-python-engine.yml)
+  constructs Chebfun `classdef` objects, invokes methods from Python and
+  converts the numerical results to NumPy.
+- [Chebfun vs NumPy precision](../../.github/workflows/chebfun-numpy-precision.yml)
+  supports **windows-local** for the same runner, and retains its existing
+  GitHub-hosted Ubuntu comparison.
 
-1. Open [this repository's Actions runners settings](https://github.com/Skylake37/chebfun/settings/actions/runners)
-   and choose **New self-hosted runner** -> **Windows** -> **x64**.
-2. In PowerShell, follow the download/extract instructions shown by GitHub.
-   Register using the short-lived token shown there:
-   ```powershell
-   .\config.cmd --url https://github.com/Skylake37/chebfun `
-     --token <TOKEN_FROM_GITHUB> `
-     --labels matlab-engine
-   ```
-3. For an initial run, decline Windows service installation and start the
-   runner interactively, under the Windows account with the MATLAB license:
-   ```powershell
-   .\run.cmd
-   ```
-4. From the repository's **Actions** tab, select
-   **Python calls MATLAB Chebfun (Engine)** -> **Run workflow** and choose the
-   installed MATLAB release, **R2026a** (default) or **R2026b**.
+## Register and start your local runner
 
-The job selects the custom labels
-`[self-hosted, windows, x64, matlab-engine]`. The runner needs Git,
-PowerShell, network access to GitHub and the Python package index, and a
-licensed MATLAB installation in the standard location:
-`C:\Program Files\MATLAB\R2026a` or `R2026b`.
-
-It uses `actions/setup-python` to provision Python 3.13 and installs the
-matching MATLAB Engine package from
-`<matlabroot>\extern\engines\python`. This avoids accidentally installing
-a PyPI Engine package targeting a different MATLAB release.
-
-## Run the same example directly from PowerShell
-
-From the repository root, with Python 3.13 installed:
+From [Settings -> Actions -> Runners](https://github.com/Skylake37/chebfun/settings/actions/runners),
+add a Windows x64 self-hosted runner. Use GitHub's current download and
+registration commands and include the custom label `matlab-engine`:
 
 ```powershell
-$env:MATLAB_RELEASE = 'R2026a'  # Change to R2026b when installed
-$matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
+.\config.cmd --url https://github.com/Skylake37/chebfun --token <TOKEN> --labels matlab-engine
+.\run.cmd
+```
+
+Start `run.cmd` under the Windows user with access to the MATLAB license.
+The runner must have Git for Windows, PowerShell 7 (`pwsh`), Python 3.11.9
+available as `python`, and MATLAB R2026a installed at
+`C:\Program Files\MATLAB\R2026a`. The workflows also permit selecting
+R2026b if installed later.
+
+Use the Actions tab's **Run workflow** button to trigger either workflow.
+For the precision comparison choose `execution_environment = windows-local`.
+
+## Fast incremental execution
+
+The Windows jobs contain no third-party `uses:` steps. They do not download
+`actions/checkout`, `actions/setup-python`, or `actions/upload-artifact`.
+
+They use `GITHUB_WORKSPACE` for a **persistent Git working copy**:
+
+1. First execution: initialize the worktree and fetch the requested commit.
+2. Subsequent executions: `git fetch --depth=1` the exact GitHub-triggering
+   commit and force-checkout its tracked contents.
+3. Reuse your existing `python` interpreter.
+4. Check local NumPy (`2.3.5`) and, for the precision workflow, mpmath
+   (`1.3.0`); run `python -m pip install` only if necessary.
+5. Start the already installed MATLAB on demand.
+
+The Engine job uses R2026a/R2026b's **preinstalled MATLAB Engine for Python**
+from `<matlabroot>\extern\engines\python\dist` using `PYTHONPATH`.
+No `matlabengine` pip installation is required.
+
+Each job's results stay on the runner under:
+
+- `<GITHUB_WORKSPACE>\python_engine_results\results.json`
+- `<GITHUB_WORKSPACE>\precision_results\SUMMARY.md`
+
+A copy is archived by GitHub run ID under
+`<GITHUB_WORKSPACE>\_local_results\engine\<run-id>-<attempt>` or
+`<GITHUB_WORKSPACE>\_local_results\precision\<run-id>-<attempt>`.
+Paths are printed in the job log and summary; **GitHub artifacts are no
+longer uploaded**, avoiding another Action download. The initial Git
+fetch still needs access to GitHub, and it fetches new commits on reruns.
+
+The working copy is treated as a build checkout: its tracked files are
+force-reset to the workflow's commit each run. Keep any local experimental
+edits in a separate Git clone.
+
+## Run the Engine demo manually
+
+From the Chebfun repository root in PowerShell:
+
+```powershell
+python --version
+$env:MATLAB_RELEASE = 'R2026a'
+$matlabRoot = Join-Path $env:ProgramFiles 'MATLAB\R2026a'
+$env:PYTHONPATH = Join-Path $matlabRoot 'extern\engines\python\dist'
 python -m pip install numpy==2.3.5
-python -m pip install (Join-Path $matlabRoot 'extern\engines\python')
 python ci/python_engine/chebfun_engine_demo.py
 ```
 
-## Chebfun classdef resolution
+The Python script adds the repository root to the MATLAB path so the
+`@chebfun` class directory resolves normally. It creates the actual
+`chebfun` class objects inside the MATLAB engine workspace, uses
+`eng.eval(...)` to execute their overloaded `feval`, `diff`, `roots` and
+`sum` methods, and calls a standard `chebpts` function with `eng.feval`.
+The resulting MATLAB numeric arrays are converted with `tomemoryview()`.
 
-The repository root, containing `@chebfun/chebfun.m`, is added to the MATLAB
-path. MATLAB resolves `@class` and `+package` folders automatically;
-avoid adding each class/package directory separately using `genpath`.
+## Security
 
-The Python code keeps `chebfun` objects in the MATLAB engine workspace,
-calls `feval(f, ...)`, `diff(f)`, `roots(f)` and `sum(f)` via `eng.eval`,
-and calls the ordinary Chebfun function `chebpts` through
-`eng.feval("chebpts", ...)`. The results become NumPy arrays via
-`tomemoryview()`. To call another Chebfun function or class method, replace
-the MATLAB expression and convert its numerical output the same way.
-
-Results are stored in `python_engine_results/results.json` and uploaded by
-the workflow.
-
-## Licensing and permissions
-
-GitHub-hosted MATLAB public-project licensing and MATLAB batch licensing
-tokens do not support the MATLAB Engine API for Python. This workflow runs
-against your local MATLAB license via the Windows self-hosted runner.
-
-Self-hosted runners execute code from the repository with the runner
-account's operating-system privileges. Use `workflow_dispatch` and grant
-workflow write access only to trusted collaborators, especially for public
-repositories.
+Self-hosted runners execute repository code with the local Windows user's
+permissions. Restrict access to workflow changes and triggers, and prefer
+a dedicated low-privilege user or machine for public repositories.
