@@ -126,7 +126,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Invalid isolated Python environment' }
           uv pip install --python $venvPython numpy==2.3.5 mpmath==1.3.0
           if ($LASTEXITCODE -ne 0) { throw 'uv failed to install isolated numerical dependencies' }
-          & $venvPython -c "import numpy, mpmath; print('NumPy:', numpy.__version__, numpy.__file__); print('mpmath:', mpmath.__version__)"
+          & $venvPython -c "import sys, pathlib, numpy, mpmath; base=pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(p.__file__).resolve().is_relative_to(base) for p in (numpy,mpmath)), 'Package escaped virtual environment'; print('NumPy:', numpy.__version__, numpy.__file__); print('mpmath:', mpmath.__version__)"
           if ($LASTEXITCODE -ne 0) { throw 'Cannot import packages from isolated uv environment' }
           $matlabExe = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE\bin\matlab.exe"
           if (-not (Test-Path $matlabExe)) { throw "MATLAB executable not found: $matlabExe" }
