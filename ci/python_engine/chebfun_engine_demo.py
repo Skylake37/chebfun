@@ -21,7 +21,12 @@ def main():
     root = Path(os.environ.get("GITHUB_WORKSPACE", Path(__file__).resolve().parents[2])).resolve()
     eng = matlab.engine.start_matlab("-nodisplay")
     try:
-        assert eng.version("-release") == "2026b"
+        actual_release = "R" + str(eng.version("-release"))
+        expected_release = os.environ.get("MATLAB_RELEASE")
+        if expected_release:
+            assert actual_release == expected_release, (
+                f"Expected {expected_release}, got {actual_release}"
+            )
         eng.addpath(str(root), nargout=0)
         resolved = eng.which("chebfun")
         print("Chebfun constructor:", resolved)
@@ -55,7 +60,7 @@ def main():
         )
 
         result = {
-            "matlab_release": eng.version("-release"),
+            "matlab_release": actual_release,
             "chebfun_class": eng.eval("class(f)"),
             "chebfun_constructor": resolved,
             "sample_points": points.tolist(),
