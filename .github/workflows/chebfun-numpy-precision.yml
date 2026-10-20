@@ -85,45 +85,79 @@ jobs:
     timeout-minutes: 60
     env:
       MATLAB_RELEASE: ${{ inputs.matlab_release }}
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Checkout original Chebfun
-        uses: actions/checkout@v4
-
-      - name: Export actual MATLAB/Chebfun results with local license
-        shell: pwsh
+      - name: Update persistent Chebfun checkout
         run: |
-          $exe = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE\bin\matlab.exe"
-          if (-not (Test-Path $exe)) { throw "MATLAB executable not found: $exe" }
-          & $exe -batch "addpath(pwd); addpath(fullfile(pwd,'ci','precision')); chebfun_precision_export"
-          if ($LASTEXITCODE -ne 0) { throw "MATLAB export failed: $LASTEXITCODE" }
+          $repo = $env:GITHUB_WORKSPACE
+          New-Item -ItemType Directory -Force -Path $repo | Out-Null
+          if (-not (Test-Path (Join-Path $repo '.git'))) {
+            git -C $repo init
+            if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+            git -C $repo remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+            if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
+          }
+          git -C $repo fetch --no-tags --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
+          git -C $repo checkout --detach --force $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
+          $actual = (git -C $repo rev-parse HEAD).Trim()
+          if ($actual -ne $env:GITHUB_SHA) { throw "Checkout mismatch: $actual" }
+          Write-Host "Chebfun source: $repo ($actual)"
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          architecture: x64
+      - name: Verify local MATLAB and Python 3.11.9
+        run: |
+          python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 11, 9), 'Expected Python 3.11.9'"
+          if ($LASTEXITCODE -ne 0) { throw 'Incorrect Python interpreter on PATH' }
+          $matlabExe = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE\bin\matlab.exe"
+          if (-not (Test-Path $matlabExe)) { throw "MATLAB executable not found: $matlabExe" }
 
-      - name: Install numerical comparison packages
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check numpy==2.3.5 mpmath==1.3.0
+      - name: Ensure local numerical dependencies (one-time installation)
+        run: |
+          foreach ($spec in @(@('numpy', '2.3.5'), @('mpmath', '1.3.0'))) {
+            $package = $spec[0]
+            $version = $spec[1]
+            $installed = python -c "import importlib.metadata as m; import sys; name=sys.argv[1]; print(next((d.version for d in m.distributions() if d.metadata.get('Name', '').lower() == name), ''))" $package
+            if ($LASTEXITCODE -ne 0) { throw "Cannot inspect $package installation" }
+            if ($installed.Trim() -ne $version) {
+              python -m pip install --disable-pip-version-check "$package==$version"
+              if ($LASTEXITCODE -ne 0) { throw "Failed to install $package==$version" }
+            } else {
+              Write-Host "Reusing $package $installed"
+            }
+          }
+
+      - name: Export real Chebfun results from local MATLAB
+        run: |
+          $matlabExe = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE\bin\matlab.exe"
+          $output = Join-Path $env:GITHUB_WORKSPACE 'precision_results'
+          if (Test-Path $output) { Remove-Item -Recurse -Force $output }
+          Push-Location $env:GITHUB_WORKSPACE
+          try {
+            & $matlabExe -batch "assert(strcmp(['R' version('-release')], '$env:MATLAB_RELEASE')); addpath(pwd); addpath(fullfile(pwd,'ci','precision')); chebfun_precision_export"
+            if ($LASTEXITCODE -ne 0) { throw "MATLAB export failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
       - name: Compare with NumPy and 80-digit mpmath
-        shell: pwsh
-        run: python ci/precision/compare_precision.py
-
-      - name: Record runtime versions
-        if: always()
-        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force precision_results | Out-Null
-          git rev-parse HEAD | Out-File -FilePath precision_results/chebfun_commit.txt -Encoding utf8
-          python -V | Out-File -FilePath precision_results/python_version.txt -Encoding utf8
-          python -m pip freeze | Out-File -FilePath precision_results/python_packages.txt -Encoding utf8
+          Push-Location $env:GITHUB_WORKSPACE
+          try {
+            python ci/precision/compare_precision.py
+            if ($LASTEXITCODE -ne 0) { throw "Python precision comparison failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
-      - name: Upload numerical results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: chebfun-matlab-vs-numpy-precision-windows-local
-          path: precision_results/
-          if-no-files-found: warn
+      - name: Preserve results locally
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE 'precision_results'
+          if (-not (Test-Path (Join-Path $source 'SUMMARY.md'))) { throw 'Missing precision summary' }
+          $archive = Join-Path $env:GITHUB_WORKSPACE "_local_results\precision\$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force -Path $archive | Out-Null
+          Copy-Item -Path (Join-Path $source '*') -Destination $archive -Recurse -Force
+          Write-Host "Results saved locally: $archive"
+          "Chebfun precision results saved at: $archive" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
