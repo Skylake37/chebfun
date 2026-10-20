@@ -10,9 +10,13 @@ meta = fopen(fullfile(outdir, 'matlab_environment.txt'), 'w');
 assert(meta > 0);
 fprintf(meta, 'MATLAB_VERSION=%s\n', version);
 fprintf(meta, 'MATLAB_RELEASE=%s\n', version('-release'));
-fprintf(meta, 'CHEBFUN_LEGPTS=%s\n', which('legpts'));
-fprintf(meta, 'CHEBFUN_CHEBPTS=%s\n', which('chebpts'));
-fprintf(meta, 'CHEBFUN_LEGPOLY=%s\n', which('legpoly'));
+for name = {'legpts', 'chebpts', 'legpoly'}
+    functionName = name{1};
+    functionPath = which(functionName);
+    assert(startsWith(functionPath, [root filesep], 'IgnoreCase', true));
+    relativePath = strrep(functionPath(numel(root)+2:end), filesep, '/');
+    fprintf(meta, 'CHEBFUN_%s=%s\n', upper(functionName), relativePath);
+end
 fclose(meta);
 
 families = {'LG','LGRminus','LGRplus','LGL','CG','CGL'};
