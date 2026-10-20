@@ -32,7 +32,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install NumPy and matching MATLAB Engine API
-        run: python -m pip install --disable-pip-version-check numpy "matlabengine>=26.2,<26.3"
+        run: python -m pip install --disable-pip-version-check numpy==2.3.5 matlabengine==26.2.5
 
       - name: Call Chebfun classdef methods from Python
         run: python ci/python_engine/chebfun_engine_demo.py
