@@ -29,8 +29,10 @@ def main():
             )
         eng.addpath(str(root), nargout=0)
         resolved = eng.which("chebfun")
-        print("Chebfun constructor:", resolved)
-        assert resolved and str(root) in resolved
+        assert resolved
+        constructor = Path(str(resolved)).resolve().relative_to(root).as_posix()
+        assert constructor == "@chebfun/chebfun.m"
+        print("Chebfun constructor: <repo>/" + constructor)
 
         # chebfun is a MATLAB classdef value class. Keep its instances inside
         # MATLAB; Python receives the outputs of MATLAB method invocations.
@@ -62,7 +64,7 @@ def main():
         result = {
             "matlab_release": actual_release,
             "chebfun_class": eng.eval("class(f)"),
-            "chebfun_constructor": resolved,
+            "chebfun_constructor": constructor,
             "sample_points": points.tolist(),
             "function_values": values.tolist(),
             "derivative_values": derivatives.tolist(),
@@ -75,7 +77,7 @@ def main():
         (outdir / "results.json").write_text(
             json.dumps(result, indent=2) + "\n", encoding="utf-8"
         )
-        print(json.dumps(result, indent=2))
+        print(f"Validated classdef outputs: {len(values)} values, {len(derivatives)} derivatives, {len(nodes)} nodes, {len(zeros)} roots")
         print("PYTHON_CHEBFUN_ENGINE_PASS")
     finally:
         eng.quit()
