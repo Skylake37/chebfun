@@ -1,12 +1,12 @@
-# Executes Python -> MATLAB Engine -> Chebfun on a locally licensed Windows runner.
-# Windows self-hosted runner needs the custom label "matlab-engine".
+# Windows self-hosted execution using local Python and MATLAB.
+# No external "uses:" actions: source checkout is persistent and incremental.
 name: Python calls MATLAB Chebfun (Engine)
 
 on:
   workflow_dispatch:
     inputs:
       matlab_release:
-        description: MATLAB release installed and licensed on the Windows runner
+        description: Locally installed MATLAB release
         type: choice
         required: true
         default: R2026a
@@ -23,48 +23,67 @@ jobs:
     timeout-minutes: 30
     env:
       MATLAB_RELEASE: ${{ inputs.matlab_release }}
-    steps:
-      - name: Checkout Chebfun
-        uses: actions/checkout@v4
-
-      - name: Verify locally licensed MATLAB
+    defaults:
+      run:
         shell: pwsh
+    steps:
+      - name: Update persistent Chebfun checkout
         run: |
+          $repo = $env:GITHUB_WORKSPACE
+          New-Item -ItemType Directory -Force -Path $repo | Out-Null
+          if (-not (Test-Path (Join-Path $repo '.git'))) {
+            git -C $repo init
+            if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+            git -C $repo remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+            if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
+          }
+          git -C $repo fetch --no-tags --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
+          git -C $repo checkout --detach --force $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
+          $actual = (git -C $repo rev-parse HEAD).Trim()
+          if ($actual -ne $env:GITHUB_SHA) { throw "Checkout mismatch: $actual" }
+          Write-Host "Chebfun source: $repo ($actual)"
+
+      - name: Verify local MATLAB and Python 3.11.9
+        run: |
+          python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 11, 9), 'Expected Python 3.11.9'"
+          if ($LASTEXITCODE -ne 0) { throw 'Incorrect Python interpreter on PATH' }
           $matlabRoot = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE"
           $matlabExe = Join-Path $matlabRoot 'bin\matlab.exe'
-          if (-not (Test-Path $matlabExe)) {
-            throw "MATLAB installation not found: $matlabExe"
-          }
+          if (-not (Test-Path $matlabExe)) { throw "MATLAB executable not found: $matlabExe" }
           & $matlabExe -batch "assert(strcmp(['R' version('-release')], '$env:MATLAB_RELEASE')); disp(version)"
-          if ($LASTEXITCODE -ne 0) { throw "MATLAB command failed: $LASTEXITCODE" }
-          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $matlabRoot 'bin')
+          if ($LASTEXITCODE -ne 0) { throw 'MATLAB verification failed' }
+          $engineDist = Join-Path $matlabRoot 'extern\engines\python\dist'
+          if (-not (Test-Path $engineDist)) { throw "MATLAB Engine distribution not found: $engineDist" }
+          $env:PYTHONPATH = if ($env:PYTHONPATH) { "$engineDist;$env:PYTHONPATH" } else { $engineDist }
+          "PYTHONPATH=$env:PYTHONPATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          python -c "import matlab.engine; print('Engine:', matlab.engine.__file__)"
+          if ($LASTEXITCODE -ne 0) { throw 'MATLAB Engine import failed' }
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          architecture: x64
-
-      - name: Install NumPy
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check numpy==2.3.5
-
-      - name: Install Engine from the matching MATLAB installation
-        shell: pwsh
+      - name: Ensure local NumPy dependency (one-time installation)
         run: |
-          $engineDir = Join-Path $env:ProgramFiles "MATLAB\$env:MATLAB_RELEASE\extern\engines\python"
-          if (-not (Test-Path $engineDir)) { throw "MATLAB Engine installer missing: $engineDir" }
-          python -m pip install $engineDir
-          if ($LASTEXITCODE -ne 0) { throw "MATLAB Engine installation failed: $LASTEXITCODE" }
+          $installed = python -c "import importlib.metadata as m; print(m.version('numpy'))" 2>$null
+          if ($LASTEXITCODE -ne 0 -or $installed.Trim() -ne '2.3.5') {
+            python -m pip install --disable-pip-version-check numpy==2.3.5
+            if ($LASTEXITCODE -ne 0) { throw 'NumPy installation failed' }
+          } else {
+            Write-Host "Reusing local NumPy $installed"
+          }
 
-      - name: Call Chebfun classdef methods from Python
-        shell: pwsh
-        run: python ci/python_engine/chebfun_engine_demo.py
+      - name: Call Chebfun classdef methods from local Python
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'python_engine_results'
+          if (Test-Path $output) { Remove-Item -Recurse -Force $output }
+          python ci/python_engine/chebfun_engine_demo.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python/Chebfun Engine example failed' }
 
-      - name: Upload Python MATLAB results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-matlab-chebfun-engine-windows
-          path: python_engine_results/
-          if-no-files-found: warn
+      - name: Preserve results locally
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE 'python_engine_results\results.json'
+          if (-not (Test-Path $source)) { throw "Missing computation results: $source" }
+          $archive = Join-Path $env:GITHUB_WORKSPACE "_local_results\engine\$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force -Path $archive | Out-Null
+          Copy-Item $source (Join-Path $archive 'results.json') -Force
+          Write-Host "Results saved locally: $archive"
+          "Python -> Chebfun result: `$archive`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
