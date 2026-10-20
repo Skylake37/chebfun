@@ -65,7 +65,7 @@ the demo under `.venv-chebfun-engine\Scripts\python.exe`.
 
 Results are saved locally under `python_engine_results` or
 `precision_results` and additionally archived in `_local_results`, with
-run-specific subdirectories. GitHub logs show the archive location. GitHub
+run-specific subdirectories. GitHub logs show the relative archive path. GitHub
 artifacts are not uploaded by the Windows jobs.
 
 ## Run the Engine demo manually without modifying global Python
